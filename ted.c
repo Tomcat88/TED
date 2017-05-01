@@ -38,9 +38,10 @@ enum editorKey {
     END_KEY
 };
 enum logLevel {
+    DEBUG = 1,
     INFO,
     WARN,
-    ERR
+    ERROR
 };
 enum editorHighlight {
     HL_NORMAL = 0,
@@ -92,6 +93,11 @@ struct editorConfig {
     struct editorSyntax *syntax;
     struct termios orig_termios;
 } E;
+struct logInfo {
+    int level;
+    char * filename;
+    FILE *fp;
+} LI;
 
 /*** filetypes ***/
 
@@ -123,6 +129,10 @@ struct editorSyntax HLDB[] = {
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen();
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
+void i(const char *fmt, ...);
+void d(const char *fmt, ...);
+void w(const char *fmt, ...);
+void e(const char *fmt, ...);
 
 /*** terminal ***/
 
@@ -613,6 +623,20 @@ void editorSave() {
     free(buf);
     editorSetStatusMessage("Could not save! I/O error: %s", strerror(errno));
 }
+void logOpen(char *filename) {
+   free(LI.filename);
+
+   LI.filename = strdup(filename);
+
+   FILE *fp = fopen(filename, "a+");
+   if (!fp) die("fopen");
+
+   LI.fp = fp;
+}
+void logClose() {
+    free(LI.filename);
+    fclose(LI.fp);
+}
 
 /*** find ***/
 
@@ -938,6 +962,7 @@ void editorProcessKeypress() {
             }
             write(STDOUT_FILENO, "\x1b[2J", 4); 
             write(STDOUT_FILENO, "\x1b[H", 3); 
+            logClose();
             exit(0);
             break;
         case CTRL_KEY('s'):
@@ -997,6 +1022,71 @@ void editorProcessKeypress() {
     quit_times = TED_QUIT_TIMES;
 }
 
+/*** log ***/
+void logWrite(int level, char *msg) {
+    char * level_str;
+    switch(level) {
+        case DEBUG: level_str = "DEBUG"; break;
+        case INFO:  level_str = "INFO";  break;
+        case WARN:  level_str = "WARN";  break;
+        case ERROR: level_str = "ERROR"; break;
+        default: level_str = "???";
+    }
+
+    char ts[100];
+    time_t t;
+    struct tm *tmp;
+    t = time(NULL);
+    tmp = localtime(&t);
+    if (tmp == NULL) die("localtime");
+    if (strftime(ts, sizeof(ts), "%F %T", tmp) == 0) die ("strftime");
+
+    if (level >= LI.level) {
+        fprintf(LI.fp, "%s [%s] %s\n", ts, level_str, msg);
+    }
+}
+void i(const char *fmt, ...) {
+    size_t msgsize = sizeof(fmt);
+    char *msg;
+    msg = malloc(msgsize);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, msgsize, fmt, ap);
+    va_end(ap);
+    logWrite(INFO, msg);
+}
+void d(const char *fmt, ...) {
+    size_t msgsize = sizeof(fmt);
+    char *msg;
+    msg = malloc(msgsize);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, msgsize, fmt, ap);
+    va_end(ap);
+    logWrite(DEBUG, msg);
+}
+void w(const char *fmt, ...) {
+    size_t msgsize = sizeof(fmt);
+    char *msg;
+    msg = malloc(msgsize);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, msgsize, fmt, ap);
+    va_end(ap);
+    logWrite(WARN, msg);
+}
+void e(const char *fmt, ...) {
+    size_t msgsize = sizeof(fmt);
+    char *msg;
+    msg = malloc(msgsize);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, msgsize, fmt, ap);
+    va_end(ap);
+    logWrite(ERROR, msg);
+}
+
+
 /*** init ***/
 
 void initEditor() {
@@ -1015,8 +1105,13 @@ void initEditor() {
     if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
     E.screenrows -= 2;
 }
+void initLog() {
+    LI.level = INFO;
+    logOpen("./ted.log");
+}
 int main(int argc, char *argv[]) {
     enableRawMode();
+    initLog();
     initEditor();
     if(argc >= 2) {
         editorOpen(argv[1]);
